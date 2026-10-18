@@ -1,0 +1,117 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+
+	"warp/internal/version"
+
+	"github.com/pterm/pterm"
+)
+
+// setupHelpMenu replaces flag.Usage with a branded pterm-rendered table
+// and a set of worked examples. We install it before flag.Parse so that
+// "warp -h" and "warp --help" both land on the custom screen.
+func setupHelpMenu() {
+	flag.Usage = func() {
+		fmt.Println()
+		pterm.DefaultHeader.WithFullWidth().
+			WithBackgroundStyle(pterm.NewStyle(pterm.BgCyan)).
+			WithTextStyle(pterm.NewStyle(pterm.FgBlack)).
+			Printfln("🚀 WARP CLI v%s", version.AppVersion)
+		pterm.Info.Println("A global, peer-to-peer compute grid for containerized local AI.")
+		fmt.Println()
+
+		pterm.DefaultSection.Println("Flags & Configuration")
+
+		tableData := pterm.TableData{
+			{"FLAG", "TYPE", "DESCRIPTION", "DEFAULT"},
+			{pterm.Cyan("-mode"), pterm.LightMagenta("string"), "Node mode: 'boss', 'worker', 'relay', 'witness', 'api', 'test', 'genkey'", pterm.Gray("none")},
+			{pterm.Cyan("-prompt"), pterm.LightMagenta("string"), "Text prompt to send to agent (only for -mode test)", pterm.Gray("none")},
+			{pterm.Cyan("-apiport"), pterm.LightMagenta("string"), "Port for the local API gateway", pterm.Gray("8080")},
+			{pterm.Cyan("-api-bind"), pterm.LightMagenta("string"), "Bind host for the API gateway (api mode)", pterm.Gray("127.0.0.1")},
+			{pterm.Cyan("-swarmkey"), pterm.LightMagenta("string"), "Path to private swarm.key file", pterm.Gray("none")},
+			{pterm.Cyan("-bootstrap"), pterm.LightMagenta("string"), "Relay/bootstrap multiaddr", pterm.Gray("none; set for cross-network peers")},
+			{pterm.Cyan("-port"), pterm.LightMagenta("int"), "Network listen port", pterm.Gray("0 (Random)")},
+			{pterm.Cyan("-agent"), pterm.LightMagenta("string"), "The AI agent loaded (max 20 chars)", pterm.Gray(`"HR Sick Leave Agent"`)},
+			{pterm.Cyan("-agentdir"), pterm.LightMagenta("string"), "Directory containing the agent code", pterm.Gray(`"../agents/sick-leave"`)},
+			{pterm.Cyan("-image"), pterm.LightMagenta("string"), "The Podman/Docker image tag to execute", pterm.Gray(`""`)},
+			{pterm.Cyan("-runtime"), pterm.LightMagenta("string"), "Container runtime: podman or docker", pterm.Gray("podman")},
+			{pterm.Cyan("-desc"), pterm.LightMagenta("string"), "Short agent description (max 3000 chars)", pterm.Gray(`"Corporate Comms."`)},
+			{pterm.Cyan("-model"), pterm.LightMagenta("string"), "Advertised core model capability (max 200 chars)", pterm.Gray(`"llama3.2"`)},
+			{pterm.Cyan("-maxtasks"), pterm.LightMagenta("int"), "Max concurrent tasks this worker accepts (1-1000)", pterm.Gray(`"1"`)},
+			{pterm.Cyan("-maxcpu"), pterm.LightMagenta("float"), "Max CPU usage % before rejecting tasks (0-99)", pterm.Gray(`"80.0"`)},
+			{pterm.Cyan("-maxgpu"), pterm.LightMagenta("float"), "Max GPU VRAM usage % before rejecting tasks (0-99)", pterm.Gray(`"80.0"`)},
+			{pterm.Cyan("-author"), pterm.LightMagenta("string"), "Name of the agent author/creator (max 50 chars)", pterm.Gray(`"Anonymous"`)},
+			// v1.3 verifiable agent mesh flags.
+			{pterm.Cyan("-witness"), pterm.LightMagenta("bool"), "v1.3 — serve the witness co-sign role on this peer", pterm.Gray("false")},
+			{pterm.Cyan("-capability"), pterm.LightMagenta("string"), "v1.3 — kebab-case capability tag (defaults to kebab(-agent))", pterm.Gray(`""`)},
+			{pterm.Cyan("-reputation-floor"), pterm.LightMagenta("float"), "v1.3.1 — refuse dispatch to peers with honesty score below this floor (-1.0 to disable)", pterm.Gray(`"-0.5"`)},
+		}
+
+		pterm.DefaultTable.WithHasHeader().WithHeaderStyle(pterm.NewStyle(pterm.FgLightGreen, pterm.Bold)).WithData(tableData).Render()
+		fmt.Println()
+
+		pterm.DefaultSection.Println("Examples & Use Cases")
+
+		pterm.Println(pterm.Yellow("1. Test an Agent Locally (Interactive Prompt, Bypasses Network)"))
+		pterm.Println(pterm.White("   ./warp -mode test \\"))
+		pterm.Println(pterm.White("     -agentdir \"../agents/crewai/hr-specialist\" -image \"warp-hr:latest\" \\"))
+		pterm.Println(pterm.White("     -model \"llama3.2\" -agent \"HR Specialist\" \\"))
+		pterm.Println(pterm.White("     -desc \"Handles sick leave policies and corporate comms.\" -maxtasks 10\n"))
+
+		pterm.Println(pterm.Yellow("2. Generate a Private Swarm Key (For closed enterprise darknets)"))
+		pterm.Println(pterm.White("   ./warp -mode genkey\n"))
+
+		pterm.Println(pterm.Yellow("3. Start a Boss Node (Interactive Terminal UI)"))
+		pterm.Println(pterm.White("   ./warp -mode boss\n"))
+
+		pterm.Println(pterm.Yellow("4. Start a Worker Node (Open mesh; configure a relay for remote peers)"))
+		pterm.Println(pterm.White("   ./warp -mode worker \\"))
+		pterm.Println(pterm.White("     -agentdir \"../agents/crewai/hr-specialist\" -image \"warp-hr:latest\" \\"))
+		pterm.Println(pterm.White("     -model \"llama3.2\" -agent \"HR Specialist\" \\"))
+		pterm.Println(pterm.White("     -desc \"Handles sick leave policies.\" -maxtasks 10 -maxcpu 90 -maxgpu 95\n"))
+
+		pterm.Println(pterm.Yellow("5. Start a Private Darknet Worker (Requires Swarm Key & Relay Bootstrap)"))
+		pterm.Println(pterm.White("   ./warp -mode worker \\"))
+		pterm.Println(pterm.White("     -agentdir \"../agents/finance-analyzer\" -image \"warp-finance:internal\" \\"))
+		pterm.Println(pterm.White("     -model \"mistral-nemo\" -agent \"Q3 Bot\" \\"))
+		pterm.Println(pterm.White("     -desc \"Analyzes highly confidential CSV spreadsheets.\" \\"))
+		pterm.Println(pterm.White("     -swarmkey \"./secrets/swarm.key\" \\"))
+		pterm.Println(pterm.White("     -bootstrap \"/ip4/198.51.100.55/tcp/4001/p2p/12D3KooW...\" -maxtasks 3\n"))
+
+		pterm.Println(pterm.Yellow("6. Start a Dedicated Relay Node (VPS Lighthouse)"))
+		pterm.Println(pterm.White("   ./warp -mode relay -port 4001\n"))
+
+		pterm.Println(pterm.Yellow("7. Start a Witness Node (Ledger-only replica; persists signed entries, no HTTP API, no podman)"))
+		pterm.Println(pterm.White("   ./warp -mode witness\n"))
+
+		pterm.Println(pterm.Yellow("8. Start an API Gateway (loopback by default — solo dev mode)"))
+		pterm.Println(pterm.White("   ./warp -mode api -apiport 8080\n"))
+
+		pterm.Println(pterm.Yellow("9. Start an API Gateway exposed off-host (requires API keys)"))
+		pterm.Println(pterm.White("   WARP_API_KEYS=\"key1,key2\" \\"))
+		pterm.Println(pterm.White("     ./warp -mode api -api-bind 0.0.0.0 -apiport 8080\n"))
+
+		pterm.Println(pterm.Yellow("10. v1.3 — inspect a peer's reputation (verifiable agent mesh)"))
+		pterm.Println(pterm.White("   ./warp reputation show <peer_id>"))
+		pterm.Println(pterm.White("   ./warp reputation show -db /path/to/api_ledger.db <peer_id>\n"))
+
+		pterm.Println(pterm.Yellow("11. v1.3.1 — Boss with strict reputation floor (refuse low-trust peers)"))
+		pterm.Println(pterm.White("    ./warp -mode api -apiport 8080 -reputation-floor -0.3\n"))
+
+		pterm.DefaultSection.Println("Environment variables")
+		envTable := pterm.TableData{
+			{"VARIABLE", "PURPOSE"},
+			{pterm.Cyan("FALKORDB_ADDR"), "FalkorDB host:port. Enables graph routing, shared memory, and capacity reservations (local demo: 127.0.0.1:6380)."},
+			{pterm.Cyan("FALKORDB_GRAPH / FALKORDB_MESH_ID"), "Graph and mesh identifiers. Use the same values on Boss nodes that should share context."},
+			{pterm.Cyan("FALKORDB_USERNAME / FALKORDB_PASSWORD / FALKORDB_TLS"), "Optional remote graph credentials and TLS configuration."},
+			{pterm.Cyan("WARP_API_KEYS"), "Comma-separated bearer tokens for the API gateway. When unset, gateway runs unauthenticated (solo-dev mode)."},
+			{pterm.Cyan("WARP_ALLOW_UNAUTH_PUBLIC"), "Set to 1 to allow -api-bind off-loopback without API keys (dangerous; documented escape hatch)."},
+			{pterm.Cyan("WARP_WEBHOOK_SECRET"), "Shared secret for HMAC-SHA256-signing outbound webhook POSTs from /api/execute/async."},
+			{pterm.Cyan("WARP_WEBHOOK_ALLOW_PRIVATE"), "Set to 1 to permit webhook URLs pointing at private/loopback addresses."},
+		}
+		pterm.DefaultTable.WithHasHeader().WithHeaderStyle(pterm.NewStyle(pterm.FgLightGreen, pterm.Bold)).WithData(envTable).Render()
+		fmt.Println()
+	}
+}

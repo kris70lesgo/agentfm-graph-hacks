@@ -1,0 +1,321 @@
+package boss
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
+
+	"warp/internal/boss/ui"
+	"warp/internal/metrics"
+	"warp/internal/network"
+
+	"github.com/pterm/pterm"
+)
+
+// ExecuteRequest is the request body accepted by POST /api/execute. A
+// missing task_id is accepted and filled in by the handler so SDK clients
+// that only care about the streamed response don't have to synthesise one.
+//
+// Feedback and FeedbackRating are optional: when Feedback is non-empty the
+// handler appends a signed Comment to the ledger after the task completes
+// (best-effort — task success is not affected by feedback persistence
+// failures). FeedbackRating, when provided, must be in [-1.0, +1.0] and
+// results in a co-appended Rating with dimension="honesty".
+type ExecuteRequest struct {
+	WorkerID       string   `json:"worker_id"`
+	Prompt         string   `json:"prompt"`
+	TaskID         string   `json:"task_id"`
+	Feedback       string   `json:"feedback,omitempty"`
+	FeedbackRating *float64 `json:"feedback_rating,omitempty"`
+}
+
+// AsyncExecuteRequest is the request body for POST /api/execute/async.
+// WebhookURL is optional; when empty the Boss finishes the task quietly
+// and writes artifacts to disk without notifying anyone.
+//
+// There is no client-supplied task_id: the async endpoint always mints its
+// own and returns it in the 202 body ("task_id"). Clients MUST read the
+// response for the id — it is the sole handle for artifact retrieval and
+// webhook correlation.
+type AsyncExecuteRequest struct {
+	WorkerID   string `json:"worker_id"`
+	Prompt     string `json:"prompt"`
+	WebhookURL string `json:"webhook_url"`
+}
+
+// apiWorker is the response DTO for GET /api/workers. It flattens a
+// WorkerProfile into the fields the SDK/UI consumes and renames a few
+// (PeerID vs peer_id is identical; AgentName becomes name, etc.).
+type apiWorker struct {
+	PeerID       string  `json:"peer_id"`
+	Author       string  `json:"author"`
+	Name         string  `json:"name"`
+	Status       string  `json:"status"`
+	Hardware     string  `json:"hardware"`
+	Description  string  `json:"description"`
+	CPUUsagePct  float64 `json:"cpu_usage_pct"`
+	RAMFreeGB    float64 `json:"ram_free_gb"`
+	CurrentTasks int     `json:"current_tasks"`
+	MaxTasks     int     `json:"max_tasks"`
+	HasGPU       bool    `json:"has_gpu"`
+	GPUUsedGB    float64 `json:"gpu_used_gb"`
+	GPUTotalGB   float64 `json:"gpu_total_gb"`
+	GPUUsagePct  float64 `json:"gpu_usage_pct"`
+
+	// Visibility fields (Phase 1 / v1.3.1)
+	AgentImageRef        string     `json:"agent_image_ref,omitempty"`
+	AgentImageDigest     string     `json:"agent_image_digest,omitempty"`
+	AgentCapability      string     `json:"agent_capability,omitempty"`
+	HonestyScore         float64    `json:"honesty_score"`
+	IsEquivocator        bool       `json:"is_equivocator"`
+	DispatchAllowed      bool       `json:"dispatch_allowed"`
+	DispatchRefuseReason string     `json:"dispatch_refuse_reason,omitempty"`
+	Online               bool       `json:"online"`
+	LastSeen             *time.Time `json:"last_seen,omitempty"`
+}
+
+// originAllowed reports whether a request Origin may perform a
+// state-changing call. A missing Origin (server-to-server, same-origin)
+// and loopback origins (desktop dev server, local tools) are allowed. Any
+// other http(s) origin is a cross-site browser context and is refused on
+// unsafe methods — the token-less loopback boss would otherwise be
+// drivable by any web page the user visits (CSRF).
+//
+// The opaque "null" origin and file:// scheme are NOT trusted by default:
+// sandboxed iframes and data: URLs on any malicious site also serialize
+// their Origin as "null", so trusting it would reopen the exact CSRF this
+// guards. The packaged Electron renderer (loadFile → file://) legitimately
+// sends Origin: null, so the desktop opts in by setting
+// WARP_ALLOW_FILE_ORIGIN=1 on the backend it spawns.
+func originAllowed(origin string) bool {
+	if origin == "" {
+		return true
+	}
+	if origin == "null" {
+		return allowFileOrigin()
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if u.Scheme == "file" {
+		return allowFileOrigin()
+	}
+	switch u.Hostname() {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
+}
+
+// allowFileOrigin reports whether the opaque null / file:// origin should be
+// trusted for state-changing requests. Off unless the host process opts in
+// (the desktop app sets WARP_ALLOW_FILE_ORIGIN=1 for its file:// renderer).
+func allowFileOrigin() bool {
+	return os.Getenv("WARP_ALLOW_FILE_ORIGIN") == "1"
+}
+
+// corsMiddleware wraps standard handlers to easily attach headers
+func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			if !originAllowed(r.Header.Get("Origin")) {
+				http.Error(w, "cross-origin request refused", http.StatusForbidden)
+				return
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	}
+}
+
+func (b *Boss) StartAPIServer(bind, port string) error {
+	// Bearer-auth config FIRST so the startup-refusal guard fires before
+	// we open any listening socket. A failing-fast public deploy never
+	// gets a chance to serve a single unauthenticated request.
+	auth, err := newAuthConfig()
+	if err != nil {
+		return fmt.Errorf("auth config: %w", err)
+	}
+	if err := enforceStartupAuthGuard(bind, auth.tokens); err != nil {
+		return err
+	}
+
+	// Root ctx cancels on SIGINT/SIGTERM so every downstream goroutine
+	// (telemetry listener, async task workers, webhook POSTs) observes
+	// the same shutdown signal.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// Tracks in-flight async task goroutines spawned by /api/execute/async
+	// AND the long-lived listenTelemetry goroutine. http.Server.Shutdown
+	// only drains HTTP handlers; these goroutines outlive the handler
+	// return, so we drain them explicitly below before letting the
+	// process exit.
+	var bgWG sync.WaitGroup
+
+	b.node.Host.SetStreamHandler(network.ArtifactProtocol, network.NewArtifactStreamHandler(b.authorizeArtifact))
+	bgWG.Add(1)
+	go func() {
+		defer bgWG.Done()
+		b.listenTelemetry(ctx)
+	}()
+
+	// Bearer-auth middleware. When WARP_API_KEYS is unset the middleware
+	// is a transparent pass-through (back-compat solo-dev mode); when keys
+	// are configured, /api/* and /v1/* require Authorization: Bearer <tok>.
+	// /metrics and /health stay open for Prometheus + LB probes.
+	auth.limiter.startJanitor(ctx)
+
+	// CORS wraps auth so OPTIONS preflights bypass auth (browsers do not
+	// send credentials on preflight). corsMiddleware short-circuits OPTIONS
+	// before calling its `next`.
+	protected := func(route string, h http.HandlerFunc) http.HandlerFunc {
+		return corsMiddleware(auth.middleware(route, h))
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/about", protected("/v1/about", b.handleAbout))
+	mux.HandleFunc("/v1/events", protected("/v1/events", b.handleEvents))
+	mux.HandleFunc("/v1/graph/status", protected("/v1/graph/status", b.handleGraphStatus))
+	mux.HandleFunc("/v1/graph/memory", protected("/v1/graph/memory", b.handleGraphMemory))
+	mux.HandleFunc("/v1/graph/route", protected("/v1/graph/route", b.handleGraphRoute))
+	mux.HandleFunc("/v1/graph/reservations", protected("/v1/graph/reservations", b.handleGraphReservations))
+	mux.HandleFunc("/api/workers", protected("/api/workers", b.handleGetWorkers))
+	mux.HandleFunc("/api/execute", protected("/api/execute", b.handleExecuteTask))
+	mux.HandleFunc("/api/execute/async", protected("/api/execute/async", b.asyncExecuteHandler(ctx, &bgWG)))
+	mux.HandleFunc("/api/relay/test", protected("/api/relay/test", b.handleRelayTest))
+	mux.HandleFunc("/v1/models", protected("/v1/models", b.handleModels))
+	mux.HandleFunc("/v1/chat/completions", protected("/v1/chat/completions", b.handleChatCompletions))
+	mux.HandleFunc("/v1/completions", protected("/v1/completions", b.handleCompletions))
+	// P4-2: ledger / reputation endpoints. The path is suffix-based
+	// so a single registration covers all sub-routes; the handlers
+	// branch on the suffix internally.
+	mux.HandleFunc("/v1/peers/", protected("/v1/peers/", b.handlePeers))
+	// /metrics and /health stay unauthenticated — Prometheus scrapers and LB
+	// health probes need both. /metrics is wrapped in CORS so the desktop
+	// renderer (Electron page, treated as a browser origin) can scrape it;
+	// Prometheus scrapers don't care about CORS headers either way.
+	mux.HandleFunc("/metrics", corsMiddleware(metrics.Handler().ServeHTTP))
+	mux.HandleFunc("/health", b.handleHealth)
+
+	// P4-5: peer reputation viewer. Unauthenticated — the same data
+	// is already exposed via /v1/peers/{id}/reputation under auth,
+	// so adding auth here would just be theatre. Static HTML, no
+	// inputs except the URL path, no API mutations.
+	mux.HandleFunc("/ui/peer/", ui.Handler())
+
+	srv := &http.Server{
+		Addr:    net.JoinHostPort(bind, port),
+		Handler: mux,
+		// Defensive server timeouts so slow-loris clients cannot exhaust
+		// handler goroutines.
+		// ReadHeaderTimeout specifically guards against slow header writes
+		// (the classic slow-loris vector).
+		// ReadTimeout bounds the whole request body (small JSON).
+		// WriteTimeout must be larger than TaskExecutionTimeout because
+		// /api/execute streams worker stdout for the full task window.
+		// IdleTimeout reaps dormant keep-alive connections.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      network.TaskExecutionTimeout + 2*time.Minute,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	// Run the server in a background goroutine and route its terminal
+	// error through a channel instead of calling pterm.Fatal (which
+	// would os.Exit(1) from inside a goroutine, skipping every defer
+	// in StartAPIServer). A caller-observable return value lets
+	// main.go decide the exit code.
+	serverErrCh := make(chan error, 1)
+	go func() {
+		pterm.Success.Printfln("🚀 Warp API Gateway listening on http://%s", srv.Addr)
+		if auth.tokens.empty() {
+			pterm.Warning.Println("Auth disabled (WARP_API_KEYS unset). Loopback bind keeps the gateway off the network.")
+		} else {
+			pterm.Info.Printfln("Auth enabled (%d API key(s) configured).", len(auth.tokens.tokens))
+		}
+		serverErrCh <- srv.ListenAndServe()
+	}()
+
+	var listenErr error
+	select {
+	case <-ctx.Done():
+		pterm.Warning.Println("\nShutting down API Gateway gracefully...")
+	case err := <-serverErrCh:
+		// Server exited before a shutdown signal, typically a bind
+		// failure at startup. We still fall through to the drain path
+		// so telemetry/async goroutines get cleaned up, then propagate
+		// the error to main.
+		if err != nil && err != http.ErrServerClosed {
+			pterm.Error.Printfln("API Server failed: %v", err)
+			listenErr = err
+		}
+	}
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		pterm.Error.Printfln("Server forced to shutdown: %v", err)
+	}
+
+	// Wait for async task goroutines to finish, bounded so a hung webhook
+	// cannot block shutdown forever.
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer drainCancel()
+	drained := make(chan struct{})
+	go func() {
+		bgWG.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+		pterm.Success.Println("Async tasks drained.")
+	case <-drainCtx.Done():
+		pterm.Warning.Println("Drain deadline hit, some async tasks still in flight.")
+	}
+
+	pterm.Success.Println("API Gateway offline.")
+	return listenErr
+}
+
+// handleHealth serves an unauthenticated liveness/readiness probe.
+// Intended for load-balancer health checks and uptime monitors. Returns
+// 200 + a tiny JSON body carrying the count of workers currently visible
+// in telemetry — enough for an LB to also do shallow capacity-aware
+// routing if it wants to.
+func (b *Boss) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	b.mu.RLock()
+	online := len(b.activeWorkers)
+	b.mu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"status":         "ok",
+		"online_workers": online,
+	}); err != nil {
+		// Body already started; nothing useful to do.
+		_ = err
+	}
+}

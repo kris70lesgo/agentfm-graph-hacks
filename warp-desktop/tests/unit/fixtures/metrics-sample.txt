@@ -1,0 +1,29 @@
+# HELP warp_tasks_total Number of task executions, partitioned by terminal status.
+# TYPE warp_tasks_total counter
+warp_tasks_total{status="error"} 0
+warp_tasks_total{status="ok"} 142
+warp_tasks_total{status="rejected"} 0
+warp_tasks_total{status="timeout"} 0
+# HELP warp_task_duration_seconds Wall-clock task duration in seconds.
+# TYPE warp_task_duration_seconds histogram
+warp_task_duration_seconds_bucket{le="1"} 12
+warp_task_duration_seconds_bucket{le="5"} 45
+warp_task_duration_seconds_bucket{le="15"} 92
+warp_task_duration_seconds_bucket{le="60"} 128
+warp_task_duration_seconds_bucket{le="+Inf"} 142
+warp_task_duration_seconds_sum 1234.5
+warp_task_duration_seconds_count 142
+# HELP warp_workers_online Number of workers currently visible in this node's telemetry.
+# TYPE warp_workers_online gauge
+warp_workers_online 5
+# HELP warp_stream_errors_total Stream-level failures on Warp libp2p protocols.
+# TYPE warp_stream_errors_total counter
+warp_stream_errors_total{protocol="task",reason="deadline"} 2
+warp_stream_errors_total{protocol="task",reason="reset"} 0
+warp_stream_errors_total{protocol="artifacts",reason="peer_eof"} 1
+# HELP process_resident_memory_bytes Resident memory size in bytes.
+# TYPE process_resident_memory_bytes gauge
+process_resident_memory_bytes 1.4892e+08
+# HELP go_goroutines Number of goroutines that currently exist.
+# TYPE go_goroutines gauge
+go_goroutines 87

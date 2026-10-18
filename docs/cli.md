@@ -1,0 +1,130 @@
+# CLI Reference
+
+The `warp` binary is multi-mode — one binary covers every role (worker, api, boss, relay, witness) via `-mode`.
+
+## `warp`
+
+| Flag | Default | Description |
+|---|:---:|---|
+| `-mode` | *required* | `boss`, `worker`, `relay`, `api`, `test`, `genkey` |
+| `-agentdir` | (none) | Path to agent dir (must contain `Dockerfile`/`Containerfile`) |
+| `-image` | (none) | Podman image tag |
+| `-runtime` | `podman` | Container runtime: `podman` or `docker` |
+| `-ledger-path` | mode default | Override the Boss/API or relay ledger path |
+| `-agent` | (none) | Advertised agent name (max 20 chars) |
+| `-model` | `llama3.2` | Advertised model engine (max 40 chars) |
+| `-desc` | (none) | Agent description (max 1000 chars) |
+| `-author` | `Anonymous` | Operator handle (max 50 chars) |
+| `-maxtasks` | `1` | Max concurrent tasks (1-1000) |
+| `-maxcpu` | `80.0` | Reject tasks above this CPU % (0-99) |
+| `-maxgpu` | `80.0` | Reject tasks above this GPU VRAM % (0-99) |
+| `-apiport` | `8080` | Port for `-mode api` HTTP gateway |
+| `-api-bind` | `127.0.0.1` | Bind host for `-mode api`. Loopback by default; pass `0.0.0.0` to expose off-host (also requires `WARP_API_KEYS` or `WARP_ALLOW_UNAUTH_PUBLIC=1`) |
+| `-prom-listen` | mode default | Prometheus `/metrics` bind. `-` disables |
+| `-log-format` | `auto` | `json`, `console`, or `auto` (TTY → console, else json) |
+| `-log-level` | `info` | `debug` / `info` / `warn` / `error` |
+| `-swarmkey` | (none) | Path to `swarm.key` for private mesh |
+| `-bootstrap` | *unset* | Relay multiaddr for cross-network peers; same-LAN discovery works without one |
+| `-port` | `0` | Listen port (0 = random; relays should use 4001) |
+| `-prompt` | (none) | One-shot prompt for `-mode test` |
+| `-witness` | `false` (worker), `true` (relay) | Advertise + serve the witness co-sign role (equivocation detection) |
+| `-capability` | kebab(`-agent`) | Kebab-case capability tag for this agent |
+| `-reputation-floor` | `-0.5` | Refuse dispatch to peers with honesty score below this value. Set to `-1.0` to disable. |
+
+### Modes
+
+| Mode | Purpose |
+|---|---|
+| `worker` | Run an agent container; advertise capabilities; accept task streams. |
+| `boss` | Interactive pterm TUI for browsing the mesh and dispatching tasks. |
+| `api` | Headless HTTP gateway exposing `/api/*` and OpenAI-compatible `/v1/*`. |
+| `relay` | Persistent lighthouse: Circuit Relay v2 (infinite limits) + DHT server + telemetry routing + archive ledger. |
+| `test` | Local container sandbox dry-run; bypasses libp2p entirely. |
+| `genkey` | Generate a 256-bit `swarm.key` for private-mesh PSK. |
+
+### Subcommands
+
+In addition to the flag-driven modes above, `warp` exposes verb-style
+subcommands that operate on local state without needing a libp2p stack.
+
+#### `warp reputation show <peer_id>`
+
+Reads the local ledger inbox and prints every rating about the given
+peer. Read-only — safe to run alongside a live worker / boss that
+shares the same database file.
+
+```bash
+warp reputation show 12D3KooW...        # default DB: .warp_ledger.db
+warp reputation show -limit 50 12D3K... # show 50 most-recent entries
+warp reputation show -db /var/run/warp/ledger.db 12D3K...
+```
+
+| Flag | Default | Description |
+|---|:---:|---|
+| `-db` | `.warp_ledger.db` | Path to the ledger SQLite database |
+| `-limit` | `20` | Number of most-recent entries to print |
+
+Output (illustrative; real peer IDs are longer):
+
+```
+Peer:       12D3KooW...
+Entries:    1240 (last: 2026-05-16T08:12:33Z)
+Honesty:    -0.20 (EigenTrust-lite, 12 raters)
+
+Latest:
+            +0.10 honesty by 12D3Ko...8s5zL (probe_ok) 2m ago
+            -0.70 honesty by 12D3Ko...kBs5z (probe_fail) 14m ago
+            ...
+```
+
+The `Honesty:` row reflects the EigenTrust-lite derived score, updated
+after each hourly aggregate window. Raw ratings are listed below it.
+
+## `warp -mode relay`
+
+Runs a permanent lighthouse — the single relay path (there is no separate relay binary). It enables Circuit Relay v2 with infinite reservation limits, a DHT in server mode, telemetry routing, and a full archive ledger so a fresh Boss can catch up even when every Boss is offline. Ideal for a $5/mo VPS.
+
+| Flag | Default | Description |
+|---|:---:|---|
+| `-port` | `0` | TCP listen port (use `4001` for a stable lighthouse) |
+| `-swarmkey` | (none) | Optional PSK for private-mesh mode |
+| `-identity` | `~/.warp/relay_identity.key` | Persistent Ed25519 identity; keeps the multiaddr stable across restarts regardless of launch dir |
+| `-prom-listen` | `127.0.0.1:9091` | Prometheus `/metrics` bind. `-` disables |
+| `-log-format` | `auto` | Same as other modes |
+| `-log-level` | `info` | Same as `warp` |
+
+## Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `WARP_API_KEYS` | Comma-separated bearer tokens for the HTTP gateway. See [Authentication](auth.md). |
+| `WARP_API_KEY` | Single bearer token for the Python SDK. |
+| `WARP_ALLOW_UNAUTH_PUBLIC` | `1` allows non-loopback `--api-bind` without `WARP_API_KEYS`. |
+| `WARP_WEBHOOK_SECRET` | HMAC-SHA256 signing secret for outbound async-task webhooks. |
+| `WARP_WEBHOOK_ALLOW_PRIVATE` | `1` allows webhook URLs pointing at private/loopback/link-local addresses (default rejected as SSRF defense). |
+
+## Examples
+
+```bash
+# Worker for a public-mesh image-gen agent
+warp -mode worker -agentdir ./flux-agent -image flux-agent:v1 \
+  -agent "FLUX 4k" -model "FLUX.2 [dev]" -maxtasks 4 -maxgpu 95
+
+# Headless API gateway, off-host with auth
+WARP_API_KEYS=$(openssl rand -hex 32) warp -mode api \
+  -api-bind 0.0.0.0 -apiport 8080
+
+# Local test (no libp2p)
+warp -mode test -agentdir ./my-agent -image my-agent:v1 \
+  -agent "My Bot" -model "llama3.2" -prompt "Write a haiku."
+
+# Generate private-mesh PSK
+warp -mode genkey  # → ./swarm.key
+```
+
+## Related
+
+- [Run a Worker](worker.md) — full worker setup walkthrough
+- [Authentication](auth.md) — `WARP_API_KEYS` + `--api-bind` interactions
+- [Private Swarms](private-swarms.md) — `-swarmkey` + `-bootstrap` usage
+- [Installation](install.md) — getting the binaries

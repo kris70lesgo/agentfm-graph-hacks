@@ -1,0 +1,335 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+
+	"warp/internal/boss"
+	"warp/internal/metrics"
+	"warp/internal/network"
+	"warp/internal/obs"
+	"warp/internal/worker"
+
+	"github.com/pterm/pterm"
+)
+
+func main() {
+	// Subcommand interception: `warp reputation <action> [args...]`
+	// is shaped like a git/kubectl subcommand rather than `-mode X`, so
+	// we peel it off before the main flag parse touches os.Args. Any
+	// other future verb-style subcommands (e.g. `warp trust verify`)
+	// should slot in here.
+	if len(os.Args) >= 2 && os.Args[1] == "reputation" {
+		runReputationSubcommand(os.Args[2:])
+		return
+	}
+
+	mode := flag.String("mode", "", "Node mode: 'boss', 'worker', 'relay', 'witness', 'api', 'test', or 'genkey'")
+
+	// Private Swarm & Network Flags
+	swarmKey := flag.String("swarmkey", "", "Path to private swarm.key file (optional)")
+	bootstrap := flag.String("bootstrap", "", "Custom bootstrap multiaddr (required for remote private swarms)")
+	identity := flag.String("identity", "", "Path to the worker's persistent libp2p identity key (default: ~/.warp/worker_identity_<agent>.key)")
+	port := flag.Int("port", 0, "Listen port (0 for random. Relays should use 4001)")
+
+	// API Gateway bind + port. Default bind is loopback so a fresh install
+	// can never accidentally expose an unauthenticated compute endpoint to
+	// the network. Pass --api-bind=0.0.0.0 to expose off-host (and set
+	// WARP_API_KEYS or WARP_ALLOW_UNAUTH_PUBLIC=1 — the gateway
+	// refuses to start without one of those when bind is non-loopback).
+	apiBind := flag.String("api-bind", "127.0.0.1", "Bind host for the API gateway (api mode). Loopback by default; pass 0.0.0.0 to expose off-host.")
+	apiPort := flag.String("apiport", "8080", "Port for the local API gateway (only used in api mode)")
+	ledgerPath := flag.String("ledger-path", "", "Override ledger SQLite path (default: ~/.warp/<mode>_ledger.db). Used by the desktop to scope a ledger to a single project.")
+
+	// Observability: Prometheus /metrics listen address. Default is loopback
+	// for safety; pass 0.0.0.0:<port> to expose to off-host scrapers.
+	// Pass "-" to disable the metrics server (worker/relay/witness only;
+	// boss-api always serves /metrics on its own port).
+	promListen := flag.String("prom-listen", "", "Prometheus /metrics listen address (worker default 127.0.0.1:9090, relay default 127.0.0.1:9091, witness default 127.0.0.1:9092; pass - to disable)")
+
+	// Structured-logging controls. Format auto-detects: console on a TTY,
+	// JSON otherwise. Operators running under systemd / docker / k8s want
+	// JSON for log aggregation; humans on a laptop want console.
+	logFormat := flag.String("log-format", obs.FormatAuto, "Log format: json, console, auto")
+	logLevel := flag.String("log-level", "info", "Log level: debug, info, warn, error")
+
+	// Test Mode Prompt
+	testPrompt := flag.String("prompt", "", "Text prompt to send to the agent (used only in -mode test)")
+
+	cfg := worker.Config{}
+	flag.StringVar(&cfg.ModelName, "model", "", "The local LLM running")
+	flag.StringVar(&cfg.AgentName, "agent", "", "The AI agent loaded")
+	flag.StringVar(&cfg.AgentDesc, "desc", "", "Agent description")
+	flag.StringVar(&cfg.ImageName, "image", "", "The Podman/Docker image to execute for this agent")
+	flag.StringVar(&cfg.AgentDir, "agentdir", "", "Directory containing the agent code")
+	flag.StringVar(&cfg.ContainerRuntime, "runtime", "podman", "Container runtime: podman or docker")
+	flag.StringVar(&cfg.Author, "author", "Anonymous", "Name of the agent author/creator")
+	// Worker capacity and thresholds
+	flag.IntVar(&cfg.MaxConcurrentTasks, "maxtasks", 1, "Maximum concurrent tasks this worker can handle")
+	flag.Float64Var(&cfg.MaxCPU, "maxcpu", 80.0, "Max CPU usage percentage before rejecting tasks")
+	flag.Float64Var(&cfg.MaxGPU, "maxgpu", 80.0, "Max GPU VRAM usage percentage before rejecting tasks")
+
+	// Per-task cgroup ceilings (roadmap R1). These bound a RUNNING container,
+	// unlike -maxcpu/-maxgpu above which only decide whether to accept a task.
+	// CPU and memory default to unlimited: a ceiling that is wrong for a given
+	// agent kills legitimate work, so the operator opts in. The pid ceiling
+	// defaults on because it stops a fork bomb at a level no real agent
+	// approaches.
+	taskCPUs := flag.Float64("task-cpus", 0, "Per-task CPU ceiling in cores (e.g. 1.5). 0 = unlimited")
+	taskMemory := flag.String("task-memory", "", "Per-task memory ceiling, e.g. 512m or 2g (swap disabled at the same value). Empty = unlimited")
+	taskPids := flag.Int64("task-pids-limit", worker.DefaultPidsLimit, "Per-task process/thread ceiling. 0 = unlimited")
+
+	// Verifiable-mesh roles (v1.3). Plain workers default off; the
+	// flag is wired here so an operator can opt a worker into the
+	// witness role explicitly. The actual handler registration lives
+	// in P2-2.
+	flag.BoolVar(&cfg.IsWitness, "witness", false, "Advertise + serve the witness co-sign role (v1.3 verifiable mesh)")
+	flag.StringVar(&cfg.Capability, "capability", "", "Kebab-case capability tag for this agent (v1.3; defaults to kebab(--agent))")
+	// v1.3.1: reputation floor (Phase 8). Peers scoring below this value
+	// are refused dispatch. Set to -1.0 to disable the floor entirely.
+	reputationFloor := flag.Float64("reputation-floor", -0.5, "Refuse dispatch to peers with honesty score below this value (-1.0 to disable)")
+
+	setupHelpMenu()
+	flag.Parse()
+
+	// Handle Key Generation. pterm.Fatal already exits the process on
+	// failure, so any os.Exit after a Fatal call would be unreachable.
+	if *mode == "genkey" {
+		if err := network.GenerateSwarmKey("swarm.key"); err != nil {
+			pterm.Fatal.Printfln("❌ Failed to generate key: %v", err)
+		}
+		pterm.Success.Println("Generated private swarm key at ./swarm.key")
+		pterm.Info.Println("Distribute this file to your VPS and trusted nodes to create a private mesh.")
+		return
+	}
+
+	if *mode == "" {
+		pterm.Error.Println("Please specify a mode: -mode boss, worker, relay, witness, api, test, or genkey")
+		os.Exit(1)
+	}
+
+	// Worker-config bounds (maxtasks, maxcpu, maxgpu, agent/desc/model
+	// lengths) only apply to roles that actually consume worker.Config.
+	// Boss/relay/api take defaults, so running the validator there would
+	// just be noise — and would surface confusing limits in --help that
+	// don't apply to the chosen mode.
+	if *mode == "worker" || *mode == "test" {
+		// cfg is passed by POINTER: the validator resolves -task-* into
+		// cfg.Limits, and a by-value copy would silently drop them — the
+		// worker would then run with no ceilings while its documentation
+		// promised otherwise.
+		validateOperatorConfig(&cfg, *taskCPUs, *taskMemory, *taskPids)
+	}
+
+	ctx := context.Background()
+
+	netCfg := network.Config{
+		Mode:         *mode,
+		SwarmKeyPath: *swarmKey,
+		ListenPort:   *port,
+		BootstrapURL: *bootstrap,
+	}
+
+	if *mode == "worker" {
+		idPath, err := resolveWorkerIdentityPath(cfg.AgentName, *identity)
+		if err != nil {
+			pterm.Fatal.Printfln("❌ Failed to resolve worker identity path: %v", err)
+		}
+		netCfg.IdentityPath = idPath
+	}
+
+	if *mode == "relay" {
+		netCfg.IdentityPath = resolveRelayIdentityPath(*identity)
+	}
+
+	if *mode == "witness" {
+		if *identity != "" {
+			netCfg.IdentityPath = *identity
+		} else {
+			netCfg.IdentityPath = defaultWitnessIdentityPath()
+		}
+	}
+
+	// Set up the structured logger BEFORE any role-specific code runs so
+	// every component-tagged log line has a consistent schema. The component
+	// tag is the same as the mode for traceability.
+	obs.Init(*mode, *logFormat, *logLevel)
+
+	// Dispatch on mode. Each branch owns its own mesh setup and shutdown
+	// so one mode can never leak a host into another.
+	switch *mode {
+	case "test":
+		runTestMode(ctx, cfg, *testPrompt)
+	case "relay":
+		runRelayMode(ctx, netCfg, defaultPromListen(*promListen, "127.0.0.1:9091"), *ledgerPath)
+	case "witness":
+		runWitnessMode(ctx, netCfg, defaultPromListen(*promListen, "127.0.0.1:9092"))
+	case "worker":
+		runWorkerMode(ctx, netCfg, cfg, defaultPromListen(*promListen, "127.0.0.1:9090"))
+	case "boss":
+		runBossMode(ctx, netCfg, *reputationFloor, *ledgerPath)
+	case "api":
+		runAPIMode(ctx, netCfg, *apiBind, *apiPort, *reputationFloor, *ledgerPath)
+	default:
+		pterm.Error.Println("Invalid mode. Use 'boss', 'worker', 'relay', 'witness', 'api', 'test', or 'genkey'.")
+		os.Exit(1)
+	}
+}
+
+// validateOperatorConfig bounds every operator-supplied limit up front.
+// Numeric ranges mirror the help table. String caps match the
+// WorkerProfile fields broadcast over GossipSub so a hostile author can
+// not balloon a radar row on every other Boss in the mesh.
+// It also resolves the -task-* ceilings into cfg.Limits, which is why cfg is a
+// pointer: these are the only operator inputs the validator produces rather
+// than merely checks.
+func validateOperatorConfig(cfg *worker.Config, taskCPUs float64, taskMemory string, taskPids int64) {
+	if cfg.MaxCPU < 0 || cfg.MaxCPU > 99 {
+		pterm.Fatal.Println("❌ Invalid config: -maxcpu must be between 0 and 99")
+	}
+	if cfg.MaxGPU < 0 || cfg.MaxGPU > 99 {
+		pterm.Fatal.Println("❌ Invalid config: -maxgpu must be between 0 and 99")
+	}
+	if cfg.MaxConcurrentTasks < 1 || cfg.MaxConcurrentTasks > 1000 {
+		pterm.Fatal.Println("❌ Invalid config: -maxtasks must be between 1 and 1000")
+	}
+
+	// Resolve the per-task ceilings before anything starts: a worker with an
+	// unusable limit must refuse to boot rather than discover it on the first
+	// task, when the failure would look like a broken agent.
+	memBytes, memErr := worker.ParseSize(taskMemory)
+	if memErr != nil {
+		pterm.Fatal.Printfln("❌ Invalid config: -task-memory: %v", memErr)
+	}
+	cfg.Limits = worker.ResourceLimits{
+		CPUs:        taskCPUs,
+		MemoryBytes: memBytes,
+		PidsLimit:   taskPids,
+	}
+	if err := cfg.Limits.Validate(); err != nil {
+		pterm.Fatal.Printfln("❌ Invalid config: %v", err)
+	}
+	if len(cfg.AgentName) > 20 {
+		pterm.Fatal.Printfln("❌ Invalid config: -agent name is too long (%d/20 chars max)", len(cfg.AgentName))
+	}
+	if len(cfg.ModelName) > 200 {
+		pterm.Fatal.Printfln("❌ Invalid config: -model name is too long (%d/200 chars max)", len(cfg.ModelName))
+	}
+	if len(cfg.AgentDesc) > 3000 {
+		pterm.Fatal.Printfln("❌ Invalid config: -desc is too long (%d/3000 chars max)", len(cfg.AgentDesc))
+	}
+	if len(cfg.Author) > 50 {
+		pterm.Fatal.Printfln("❌ Invalid config: -author name is too long (%d/50 chars max)", len(cfg.Author))
+	}
+}
+
+// runTestMode runs the local sandbox without any libp2p activity. This
+// is the fastest way for an agent author to confirm their container
+// image behaves before pushing it out to the mesh.
+func runTestMode(ctx context.Context, cfg worker.Config, testPrompt string) {
+	pterm.DefaultHeader.WithBackgroundStyle(pterm.NewStyle(pterm.BgYellow)).
+		WithTextStyle(pterm.NewStyle(pterm.FgBlack)).
+		Println("🧪 LOCAL SANDBOX TEST MODE")
+
+	pterm.Info.Printfln("Testing Agent: %s", cfg.AgentName)
+	pterm.Warning.Println("Bypassing P2P network. Executing container directly...")
+
+	promptToUse := testPrompt
+	if promptToUse == "" {
+		fmt.Println()
+		pterm.Info.Print("📝 Enter the prompt you want to send to your agent: ")
+		reader := bufio.NewReader(os.Stdin)
+		input, _ := reader.ReadString('\n')
+		promptToUse = strings.TrimSpace(input)
+
+		if promptToUse == "" {
+			pterm.Fatal.Println("❌ No prompt provided. Exiting test.")
+		}
+	}
+
+	testCtx, stopTest := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stopTest()
+	if err := worker.RunLocalTest(testCtx, cfg, promptToUse); err != nil {
+		pterm.Fatal.Printfln("❌ Local test failed: %v", err)
+	}
+}
+
+func runWorkerMode(ctx context.Context, netCfg network.Config, cfg worker.Config, promListen string) {
+	workerCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	node, err := network.Setup(workerCtx, netCfg)
+	if err != nil {
+		pterm.Fatal.Println(err)
+	}
+	if promListen != "" {
+		go func() {
+			if err := metrics.Serve(workerCtx, promListen); err != nil {
+				pterm.Error.Printfln("metrics server: %v", err)
+			}
+		}()
+		pterm.Success.Printfln("Metrics server: http://%s/metrics", promListen)
+	}
+	w := worker.New(node, cfg)
+	w.Start(workerCtx)
+}
+
+// defaultPromListen picks the listen address: if the operator passed a
+// non-empty --prom-listen value it wins; otherwise fall back to the
+// per-mode safe-by-default loopback address. To explicitly disable the
+// metrics server, pass --prom-listen=- (a single dash).
+func defaultPromListen(flagValue, modeDefault string) string {
+	if flagValue == "-" {
+		return ""
+	}
+	if flagValue != "" {
+		return flagValue
+	}
+	return modeDefault
+}
+
+// runBossMode opens the interactive TUI for a human operator.
+func runBossMode(ctx context.Context, netCfg network.Config, reputationFloor float64, ledgerPath string) {
+	// Bind SIGINT/SIGTERM to the root ctx so Ctrl+C unwinds cleanly when
+	// the user is mid-task (NOT inside selectWorkerInteractive's
+	// keyboard.Listen, which catches Ctrl+C separately). Without this the
+	// Go runtime's default handler kills the process and skips every
+	// defer: host.Close(), area.Stop(), open libp2p stream Reset.
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	node, err := network.Setup(ctx, netCfg)
+	if err != nil {
+		pterm.Fatal.Println(err)
+	}
+	bossOpts, cleanup := bossOptionsFromFlags(ctx, "boss", node, reputationFloor, "", ledgerPath)
+	defer cleanup()
+	b := boss.NewWithOptions(node, bossOpts)
+	AttachBoss(b)
+	b.Run(ctx)
+}
+
+// runAPIMode starts the HTTP gateway that SDK clients talk to. The
+// gateway's own error is returned all the way back here so the process
+// exit code reflects whether the server came up cleanly. Errors include
+// startup-refusal (public bind without API keys) so a misconfigured
+// deployment fails loudly instead of silently exposing compute.
+func runAPIMode(ctx context.Context, netCfg network.Config, apiBind, apiPort string, reputationFloor float64, ledgerPath string) {
+	node, err := network.Setup(ctx, netCfg)
+	if err != nil {
+		pterm.Fatal.Println(err)
+	}
+	bossOpts, cleanup := bossOptionsFromFlags(ctx, "api", node, reputationFloor, "", ledgerPath)
+	defer cleanup()
+	b := boss.NewWithOptions(node, bossOpts)
+	AttachBoss(b)
+	if err := b.StartAPIServer(apiBind, apiPort); err != nil {
+		pterm.Fatal.Printfln("❌ API Gateway exited with error: %v", err)
+	}
+}

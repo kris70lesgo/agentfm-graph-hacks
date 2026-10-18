@@ -1,0 +1,54 @@
+name: desktop-windows-build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "warp-desktop-v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: warp-desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: warp-go/go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build Windows backend binary
+        working-directory: warp-go
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          # Name using Node's platform-arch (win32-x64) so it matches what
+          # backend-manager.ts resolves at runtime (warp-${process.platform}-${process.arch})
+          # and what scripts/build-binaries.sh emits. electron-builder's
+          # extraResources copies resources/warp-* into Resources/bin/.
+          mkdir -p ../warp-desktop/resources
+          go build -trimpath -ldflags="-s -w" -o ../warp-desktop/resources/warp-win32-x64.exe ./cmd/warp
+
+      - name: Install desktop deps
+        run: npm ci
+
+      - name: Build renderer + main
+        run: npm run build
+
+      - name: Build NSIS installer
+        run: npx electron-builder --win nsis --x64
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: warp-windows-installer
+          path: warp-desktop/dist/*.exe

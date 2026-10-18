@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+
+# Stop Python from buffering outputs so Warp sees logs immediately
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+RUN mkdir -p /tmp/output && chmod 755 /tmp/output
+
+RUN pip install --no-cache-dir requests
+
+COPY run.py /app/run.py
+
+ENTRYPOINT ["python", "/app/run.py"]

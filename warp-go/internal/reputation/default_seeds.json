@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "updated_at": "2026-10-19T00:00:00Z",
+  "_comment": "No Warp-operated public mesh or trust anchor is configured. Operators who need a shared trust gradient should supply a reviewed genesis-seed manifest for their mesh.",
+  "seeds": []
+}

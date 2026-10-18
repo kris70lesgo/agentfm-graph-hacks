@@ -1,0 +1,190 @@
+.graph-flow-frame {
+  overflow: hidden;
+  border-radius: 7px;
+  background: #191b1e;
+}
+
+.graph-flow {
+  min-height: 390px;
+  width: 100%;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255, 159, 10, 0.055), transparent 52%),
+    #191b1e;
+}
+
+.graph-flow .react-flow__background pattern circle {
+  fill: #52565e;
+}
+
+.graph-flow .react-flow__edge-path {
+  stroke-linecap: round;
+}
+
+.graph-flow .react-flow__edge-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+}
+
+.graph-flow .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+.graph-flow .react-flow__controls-button {
+  height: 28px;
+  width: 28px;
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+  background: #292b2f;
+  fill: #c2c2c8;
+}
+
+.graph-flow .react-flow__controls-button:hover {
+  background: #383a3f;
+}
+
+.graph-flow .react-flow__controls-button svg {
+  max-width: 13px;
+  max-height: 13px;
+}
+
+.graph-flow .react-flow__attribution {
+  background: rgba(25, 27, 30, 0.8);
+  color: #aaaeb6;
+  font-size: 9px;
+}
+
+.graph-entity {
+  position: relative;
+  display: flex;
+  width: 204px;
+  min-height: 78px;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 8px;
+  background: #25272b;
+  padding: 11px 12px;
+  color: #f4f4f5;
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.graph-entity:hover {
+  border-color: rgba(255, 255, 255, 0.24);
+  background: #2a2c31;
+}
+
+.graph-entity-icon {
+  display: grid;
+  height: 34px;
+  width: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.035);
+  opacity: 0.95;
+}
+
+.graph-entity-copy { min-width: 0; flex: 1; }
+.graph-entity-kind {
+  color: #aeb2bb;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.11em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+.graph-entity-title {
+  overflow: hidden;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.graph-entity-detail {
+  overflow: hidden;
+  margin-top: 4px;
+  color: #c0c3ca;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.graph-entity-status,
+.graph-entity-emphasis {
+  position: absolute;
+  right: 8px;
+  top: -9px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: #202226;
+  padding: 2px 6px;
+  color: #d2d4d9;
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 0.045em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.graph-entity--amber { color: #ffb547; border-color: rgba(255, 181, 71, 0.38); }
+.graph-entity--mint { color: #72dfb4; border-color: rgba(114, 223, 180, 0.35); }
+.graph-entity--blue { color: #91bcff; border-color: rgba(145, 188, 255, 0.34); }
+.graph-entity--slate { color: #b5bbc5; }
+.graph-entity-status { color: #87e0b8; }
+.graph-entity-emphasis { color: #ffd08b; }
+
+.graph-entity .react-flow__handle {
+  height: 5px;
+  width: 5px;
+  min-height: 5px;
+  min-width: 5px;
+  border: 0;
+  background: #a8adb6;
+  opacity: 0;
+}
+
+.graph-flow-empty {
+  display: flex;
+  min-height: 300px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px;
+  color: #b7bbc3;
+  text-align: center;
+}
+.graph-flow-empty svg { color: #ffb547; }
+.graph-flow-empty strong { color: #f4f4f5; font-size: 14px; }
+.graph-flow-empty span { max-width: 430px; font-size: 12px; line-height: 1.6; }
+
+.graph-flow-caption {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  padding: 8px 14px;
+  color: #b8bbc2;
+  font-size: 10px;
+}
+.graph-flow-caption span:first-child { display: flex; align-items: center; gap: 8px; }
+.graph-flow-caption i { height: 3px; width: 3px; border-radius: 50%; background: #ffb547; }
+
+@media (max-width: 700px) {
+  .graph-flow-caption { align-items: flex-start; flex-direction: column; gap: 3px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph-entity { transition: none; }
+}

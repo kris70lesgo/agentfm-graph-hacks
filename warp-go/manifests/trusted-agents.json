@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "updated_at": "2026-05-17T00:00:00Z",
+  "_comment": "Open meshes default to attestation-mode=warn and an EMPTY curated registry. Workers self-attest via their advertised OCI image digest; reputation is used by routing over time (see docs/trust.md). Operators that want strict curation can use --trusted-agents with their own manifest.",
+  "entries": []
+}

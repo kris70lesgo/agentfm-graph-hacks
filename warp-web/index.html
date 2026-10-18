@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <title>Warp: coordinate AI agents with a shared graph</title>
+  <meta name="description" content="Connect containerized workers through a peer-to-peer mesh, then use FalkorDB for connected-data routing, shared task memory, and capacity coordination. No cloud account. Graph coordination stays in the FalkorDB instance you configure." />
+  <meta property="og:title" content="Warp" />
+  <meta property="og:description" content="Run AI agents on a peer-to-peer mesh of idle machines. Ollama, but distributed." />
+  <meta property="og:url" content="https://github.com/kris70lesgo/warpg" />
+  <meta property="og:image" content="https://raw.githubusercontent.com/kris70lesgo/warpg/main/warp-web/assets/img/warp-graph-context.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
+  <link rel="apple-touch-icon" href="assets/img/favicon.png" />
+  <link rel="preload" href="assets/fonts/space-grotesk-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="assets/fonts/space-grotesk-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="assets/fonts/jetbrains-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="css/style.css" />
+  <script>document.documentElement.classList.add('js')</script>
+</head>
+<body>
+  <a class="skip-link" href="#how">Skip to content</a>
+  <div class="grid-bg" aria-hidden="true"></div>
+
+  <nav class="nav">
+    <div class="wrap">
+      <a class="brand" href="#top" aria-label="Warp home">
+        <span class="wordmark">WARP<span>.</span></span>
+      </a>
+      <div class="nav-links">
+        <a href="#desktop">Desktop</a>
+        <a href="#how">How it works</a>
+        <a href="#trust">Trust</a>
+        <a href="https://github.com/kris70lesgo/warpg/tree/main/docs">Docs</a>
+      </div>
+      <div class="nav-cta">
+        <a class="gh-pill" href="https://github.com/kris70lesgo/warpg" aria-label="Warp on GitHub">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          <span id="gh-stars">Star</span>
+        </a>
+        <a class="btn btn-amber btn-play" href="playground.html">Playground</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero" id="top">
+    <canvas id="mesh" aria-hidden="true"></canvas>
+    <div class="wrap">
+      <div class="hero-copy">
+        <h1>Idle machines,<br />working as <span class="accent">one mesh</span>.</h1>
+        <p>Connect containerized workers through a peer-to-peer mesh, then use FalkorDB for connected-data routing, shared task memory, and capacity coordination.</p>
+        <div class="hero-actions">
+          <a class="btn btn-amber btn-lg" href="https://github.com/kris70lesgo/warpg/blob/main/docs/falkordb-hackathon.md">Run the local demo</a>
+          <a class="btn btn-amber btn-lg" href="https://github.com/kris70lesgo/warpg/blob/main/docs/install.md">Build Warp from source</a>
+          <a class="btn btn-ghost btn-lg" href="#how">See how it works</a>
+        </div>
+        <div class="hero-install">
+          <span aria-hidden="true">$</span>
+          <code>cd warp-go && go install ./cmd/warp</code>
+          <button class="install-copy" type="button" aria-label="Copy install command">copy</button>
+        </div>
+
+      </div>
+    </div>
+    <div class="hero-veil" aria-hidden="true"></div>
+    <div class="hero-phases" aria-hidden="true">
+      <div class="hero-phase" data-phase="0">
+        <h2>Run agents on hardware <span class="accent">you already own</span>.</h2>
+        <p>a spare workstation &middot; a gaming rig &middot; the office mini pc</p>
+      </div>
+      <div class="hero-phase" data-phase="1">
+        <h2>No cloud account. <span class="accent">Your mesh, your data.</span></h2>
+        <p>end-to-end encrypted libp2p streams between machines you choose</p>
+      </div>
+    </div>
+    <div class="hero-hint" aria-hidden="true">
+      <span>scroll</span>
+      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4l4 4 4-4"/></svg>
+    </div>
+  </header>
+
+  <main>
+  <section class="section divide" id="how">
+    <div class="wrap">
+      <p class="kicker reveal">How it works</p>
+      <h2 class="reveal">Three roles. One binary.</h2>
+      <p class="lede reveal">Each node runs the same <code>warp</code> binary. Choose a worker, Boss, or relay role, and connect peers to a relay you operate.</p>
+
+      <div class="flow">
+        <div class="lane">
+          <svg class="lane-icon" viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+          <span class="mono-tag">-mode worker</span>
+          <h3>Workers run your agent</h3>
+          <p>Each task executes in a fresh Podman sandbox. Workers broadcast live CPU, GPU, RAM and queue depth every two seconds.</p>
+        </div>
+        <div class="lane">
+          <svg class="lane-icon" viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+          <span class="mono-tag">-mode relay</span>
+          <h3>The relay keeps everyone found</h3>
+          <p>Run a relay you control for discovery and NAT traversal across networks. Warp ships without a public relay address; same-LAN peers can use local discovery.</p>
+        </div>
+        <div class="lane">
+          <svg class="lane-icon" viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4Z"/></svg>
+          <span class="mono-tag">-mode api</span>
+          <h3>You dispatch from anywhere</h3>
+          <p>The desktop app, a curl one-liner, or any OpenAI SDK. Output streams back live and files return as zipped artifacts.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="scrolly divide" id="dispatch" aria-label="Anatomy of a dispatch">
+    <div class="scrolly-inner">
+      <div class="wrap">
+        <div class="stage" aria-hidden="true">
+          <div class="stage-head">
+            <p class="kicker">Anatomy of a dispatch</p>
+            <div class="stage-titles">
+              <div class="stage-title" data-title="0">
+                <h2>You hit <span class="accent">send</span>.</h2>
+                <p>The trust gate checks reputation first, then routes to the least-loaded worker.</p>
+              </div>
+              <div class="stage-title" data-title="1">
+                <h2>A fresh sandbox. <span class="accent">Every time.</span></h2>
+                <p>Your agent runs in a throwaway Podman container. Nothing touches the host.</p>
+              </div>
+              <div class="stage-title" data-title="2">
+                <h2>Output streams back <span class="accent">live</span>.</h2>
+                <p>Token by token, over a direct end-to-end encrypted libp2p channel.</p>
+              </div>
+              <div class="stage-title" data-title="3">
+                <h2>Files come <span class="accent">home</span>.</h2>
+                <p>Everything the agent writes returns as a zip on the artifact protocol.</p>
+              </div>
+              <div class="stage-title" data-title="4">
+                <h2>Every result leaves a <span class="accent">signed receipt</span>.</h2>
+                <p>Your rating is Ed25519-signed and appended to a tamper-evident Merkle log.</p>
+              </div>
+            </div>
+          </div>
+          <svg class="scene" viewBox="0 0 960 470" preserveAspectRatio="xMidYMid meet">
+            <path class="sc-path" id="route-gate" d="M172,240 Q290,208 384,238" />
+            <path class="sc-path" id="route-w1" d="M456,236 Q630,150 772,112" />
+            <path class="sc-path" id="route-w2" d="M456,240 Q620,258 772,241" />
+            <path class="sc-path" id="route-w3" d="M456,244 Q630,334 772,368" />
+            <path class="sc-path sc-return" id="route-back" d="M782,88 Q470,26 168,206" />
+            <g class="sc-node sc-boss">
+              <circle cx="140" cy="240" r="30" class="sc-ring sc-ring-amber" />
+              <path d="M128,248 L152,232 M152,232 L141,231 M152,232 L150,243" class="sc-glyph sc-glyph-amber" />
+              <text x="140" y="292" class="sc-name">you</text>
+              <text x="140" y="308" class="sc-sub">desktop &middot; boss</text>
+            </g>
+            <g class="sc-gate">
+              <path d="M420,206 l24,10 v17 c0,19 -10,30 -24,37 c-14,-7 -24,-18 -24,-37 v-17 z" class="sc-shield" />
+              <path d="M410,238 l7,8 l14,-16" class="sc-check" />
+              <text x="420" y="298" class="sc-sub">trust gate</text>
+              <circle cx="420" cy="238" r="34" class="sc-pulse" />
+              <g class="sc-chip gate-chip">
+                <rect x="348" y="156" width="144" height="26" rx="13" />
+                <text x="420" y="173">+0.67 &middot; allowed</text>
+              </g>
+            </g>
+            <g class="sc-node sc-worker" data-worker="0">
+              <circle cx="800" cy="105" r="24" class="sc-ring" />
+              <path d="M789,98 h22 v15 h-22 z M789,104 h22" class="sc-glyph" />
+              <text x="800" y="150" class="sc-name">hr bot</text>
+              <text x="800" y="165" class="sc-sub">queue 0/9</text>
+              <g class="sc-chip q-chip"><rect x="832" y="92" width="52" height="22" rx="11" /><text x="858" y="107">0/9</text></g>
+            </g>
+            <g class="sc-node sc-worker" data-worker="1">
+              <circle cx="800" cy="240" r="24" class="sc-ring" />
+              <path d="M789,233 h22 v15 h-22 z M789,239 h22" class="sc-glyph" />
+              <text x="800" y="285" class="sc-name">code bot</text>
+              <text x="800" y="300" class="sc-sub">queue 3/4</text>
+              <g class="sc-chip q-chip"><rect x="832" y="227" width="52" height="22" rx="11" /><text x="858" y="242">3/4</text></g>
+            </g>
+            <g class="sc-node sc-worker" data-worker="2">
+              <circle cx="800" cy="375" r="24" class="sc-ring" />
+              <path d="M789,368 h22 v15 h-22 z M789,374 h22" class="sc-glyph" />
+              <text x="800" y="420" class="sc-name">render bot</text>
+              <text x="800" y="435" class="sc-sub">queue 2/2</text>
+              <g class="sc-chip q-chip"><rect x="832" y="362" width="52" height="22" rx="11" /><text x="858" y="377">2/2</text></g>
+            </g>
+            <g class="sandbox">
+              <rect x="738" y="48" width="176" height="128" rx="10" class="sandbox-rect" />
+              <text x="746" y="42" class="sc-mono sandbox-tag">podman run --rm</text>
+              <text x="750" y="190" class="sc-mono sandbox-line" data-sl="0">no host access</text>
+              <text x="750" y="205" class="sc-mono sandbox-line" data-sl="1">.env injected &middot; gpu attached</text>
+            </g>
+            <g class="term">
+              <rect x="56" y="330" width="252" height="98" rx="8" class="term-box" />
+              <circle cx="72" cy="346" r="3" class="term-dot" />
+              <circle cx="84" cy="346" r="3" class="term-dot" />
+              <text x="70" y="372" class="sc-mono term-line" data-tl="0">&gt; drafting summary&#8230;</text>
+              <text x="70" y="390" class="sc-mono term-line" data-tl="1">| tokens 412 &middot; 38 t/s</text>
+              <text x="70" y="408" class="sc-mono term-line" data-tl="2">| PDF artifact saved</text>
+              <rect x="70" y="414" width="7" height="10" class="term-cursor" />
+            </g>
+            <g class="sc-chip file-chip" data-file="0"><rect x="672" y="120" width="88" height="22" rx="6" /><text x="716" y="135">report.pdf</text></g>
+            <g class="sc-chip file-chip" data-file="1"><rect x="688" y="196" width="88" height="22" rx="6" /><text x="732" y="211">chart.png</text></g>
+            <g class="sc-chip zip-chip"><rect x="-56" y="-12" width="112" height="24" rx="7" /><text x="0" y="4">task_ab12.zip</text></g>
+            <g class="ledger-mini">
+              <rect x="330" y="336" width="330" height="76" rx="8" class="ledger-box" />
+              <text x="348" y="366" class="sc-mono ledger-row" data-lr="0">entry 21  rating +0.80 honesty  <tspan class="ok">sig ok</tspan></text>
+              <text x="348" y="392" class="sc-mono ledger-row" data-lr="1">merkle root 3bced30e&#8230;76da  <tspan class="ok">verified</tspan></text>
+            </g>
+            <circle class="sc-packet" r="5" />
+            <g class="stream-dots">
+              <circle class="stream-dot" r="2.6" /><circle class="stream-dot" r="2.6" /><circle class="stream-dot" r="2.6" />
+              <circle class="stream-dot" r="2.6" /><circle class="stream-dot" r="2.6" /><circle class="stream-dot" r="2.6" />
+            </g>
+          </svg>
+          <div class="stage-rail">
+            <span class="rail-item" data-rail="0">dispatch</span>
+            <span class="rail-item" data-rail="1">sandbox</span>
+            <span class="rail-item" data-rail="2">stream</span>
+            <span class="rail-item" data-rail="3">artifact</span>
+            <span class="rail-item" data-rail="4">verify</span>
+          </div>
+        </div>
+        <div class="scrolly-steps">
+          <p class="kicker">Anatomy of a dispatch</p>
+          <h2>What happens when you hit send.</h2>
+          <ol class="steps">
+            <li class="step" data-step="0"><b>Dispatch</b><span>Your task routes to the least-loaded worker that advertises the right model. The trust gate checks its reputation first.</span></li>
+            <li class="step" data-step="1"><b>Sandbox</b><span>The worker spins up a fresh Podman container and runs your agent inside it. Nothing touches the host.</span></li>
+            <li class="step" data-step="2"><b>Stream</b><span>Standard output streams back to you live, token by token, over the direct libp2p task channel.</span></li>
+            <li class="step" data-step="3"><b>Artifact</b><span>Any files the agent writes come back as a zip, dropped into your artifacts folder by task id.</span></li>
+            <li class="step" data-step="4"><b>Verify</b><span>You rate the result. The score is Ed25519-signed and appended to a tamper-evident Merkle log.</span></li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section divide" id="desktop">
+    <div class="wrap">
+      <div class="showcase-head">
+        <div>
+          <h2 class="reveal">A calm console for your mesh.</h2>
+          <p class="lede reveal">The Graph Context console shows the FalkorDB relationships, ranked routes, shared task outcomes, and worker capacity claims behind each dispatch.</p>
+        </div>
+        <a class="btn btn-ghost reveal" href="https://github.com/kris70lesgo/warpg/blob/main/docs/DESKTOP.md">Read the tour</a>
+      </div>
+
+      <figure class="frame reveal">
+        <img src="assets/img/warp-graph-context.png" alt="Warp Graph Context console showing live FalkorDB worker relationships, route ranking, shared memory, and reservations" loading="lazy" width="1600" height="1877" />
+      </figure>
+
+      <div class="shot-row">
+        <figure class="shot reveal">
+          <a href="assets/img/warp-graph-context.png"><img src="assets/img/warp-graph-context.png" alt="Detailed Warp graph context and route explanation" loading="lazy" width="1600" height="1877" /></a>
+          <figcaption><b>Connected data</b> shows the live graph and explains why a worker ranks for a task.</figcaption>
+        </figure>
+        <figure class="shot reveal">
+          <a href="assets/img/warp-coordination.png"><img src="assets/img/warp-coordination.png" alt="A worker capacity reservation shared with a second Boss gateway" loading="lazy" width="1600" height="900" /></a>
+          <figcaption><b>Shared coordination</b> makes worker reservations visible across Boss gateways.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section divide" id="trust">
+    <div class="wrap trust">
+      <div>
+        <h2 class="reveal">Proof, not promises.</h2>
+        <p class="lede reveal">An open mesh needs more than vibes. Every rating is a signed receipt, and anyone can verify the chain.</p>
+        <div class="trust-points">
+          <div class="trust-point reveal">
+            <h3>Signatures bound to identity</h3>
+            <p>The verifying key is derived from the rater's peer id. You cannot forge another peer's rating or edit one after the fact.</p>
+          </div>
+          <div class="trust-point reveal">
+            <h3>Append-only Merkle log</h3>
+            <p>Ratings and comments land on a per-peer log with RFC 6962 inclusion proofs. Tampering breaks the root.</p>
+          </div>
+          <div class="trust-point reveal">
+            <h3>Reputation that gates dispatch</h3>
+            <p>EigenTrust weighs every rater by their own standing. Equivocators get caught by witnesses and refused work, mesh-wide.</p>
+          </div>
+        </div>
+      </div>
+      <div class="ledger reveal" id="ledger" role="img" aria-label="Example of signed ledger entries: ratings and comments, each with a verified signature, anchored to a Merkle root">
+        <div class="row"><span class="h">entry 14</span><span class="score">rating +0.80 honesty</span><span class="sig">sig ok</span></div>
+        <div class="row"><span class="h">entry 15</span><span class="cmt">comment "clean, well-cited summary"</span><span class="sig">sig ok</span></div>
+        <div class="row"><span class="h">entry 16</span><span class="score">rating +0.67 honesty</span><span class="sig">sig ok</span></div>
+        <div class="row"><span class="h">entry 17</span><span class="cmt">comment "handled the contract review"</span><span class="sig">sig ok</span></div>
+        <div class="row"><span class="h">entry 18</span><span class="score">rating -0.30 honesty</span><span class="sig">sig ok</span></div>
+        <div class="row"><span class="h">entry 19</span><span class="score">rating +0.55 honesty</span><span class="sig">sig ok</span></div>
+        <div class="row"><span class="h">entry 20</span><span class="cmt">comment "fast artifact turnaround"</span><span class="sig">sig ok</span></div>
+        <div class="row root"><span>merkle root 3bced30e…76da</span><span class="sig">verified</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section divide" id="quickstart">
+    <div class="wrap qs">
+      <h2 class="reveal">Speak OpenAI to your own hardware.</h2>
+      <p class="lede reveal">Point any OpenAI client at the gateway and the mesh answers. Nothing leaves machines you chose.</p>
+
+      <div class="reveal">
+        <div class="tabs" role="tablist" aria-label="Quickstart examples">
+          <button class="tab" role="tab" id="tab-curl" aria-controls="pane-curl" aria-selected="true" data-pane="curl">curl</button>
+          <button class="tab" role="tab" id="tab-python" aria-controls="pane-python" aria-selected="false" tabindex="-1" data-pane="python">python</button>
+          <button class="tab" role="tab" id="tab-worker" aria-controls="pane-worker" aria-selected="false" tabindex="-1" data-pane="worker">run a worker</button>
+        </div>
+        <div class="codebox">
+          <button class="copy-btn" data-copy aria-live="polite">copy</button>
+          <pre id="pane-curl" role="tabpanel" aria-labelledby="tab-curl" data-pane-content="curl"><code><span class="c"># start the gateway</span>
+warp -mode api -apiport 8080
+
+<span class="c"># list agents on the mesh and copy the peer id you want</span>
+curl http://127.0.0.1:8080/api/workers
+
+<span class="c"># dispatch to that agent by peer id — stdout streams straight back</span>
+curl -N http://127.0.0.1:8080/api/execute \
+  -H <span class="s">'Content-Type: application/json'</span> \
+  -d <span class="s">'{"worker_id":"12D3KooWQ9BD…8qQrh","prompt":"Draft a sick-leave email"}'</span></code></pre>
+          <pre id="pane-python" role="tabpanel" aria-labelledby="tab-python" data-pane-content="python" hidden><code><span class="c"># From warp-python: python -m pip install -e .</span>
+<span class="k">from</span> warp <span class="k">import</span> WarpClient
+
+<span class="k">with</span> WarpClient(gateway_url=<span class="s">"http://127.0.0.1:8080"</span>) <span class="k">as</span> client:
+    workers = client.workers.list(available_only=<span class="k">True</span>)
+    result = client.tasks.run(worker_id=workers[0].peer_id,
+                              prompt=<span class="s">"Draft a leave policy."</span>)
+    <span class="k">print</span>(result.text, result.artifacts)</code></pre>
+          <pre id="pane-worker" role="tabpanel" aria-labelledby="tab-worker" data-pane-content="worker" hidden><code><span class="c"># share your idle machine with the mesh</span>
+cd warp-go && go install ./cmd/warp
+
+<span class="c"># -agentdir   folder with your agent's Dockerfile / Containerfile</span>
+<span class="c"># -image      container image the tasks run in</span>
+<span class="c"># -agent      display name shown on the mesh radar</span>
+<span class="c"># -desc       what your agent does, shown to dispatchers</span>
+<span class="c"># -capability kebab-case tag the trust gate matches on</span>
+<span class="c"># -model      model your agent advertises for routing</span>
+<span class="c"># -author     attribution on your agent's profile</span>
+<span class="c"># -maxtasks   queue slots before the node reports BUSY</span>
+<span class="c"># -maxcpu/-maxgpu   load % circuit breakers</span>
+warp -mode worker \
+  -agentdir ./my-agent -image ghcr.io/you/myagent:v1 \
+  -agent <span class="s">"HR Bot"</span> -desc <span class="s">"Reviews contracts and drafts HR comms"</span> \
+  -capability legal-review -model llama3.2 -author <span class="s">"you"</span> \
+  -maxtasks 4 -maxcpu 60 -maxgpu 70</code></pre>
+        </div>
+      </div>
+
+      <div class="modes reveal">
+        <div class="mode"><code>-mode worker</code><p>Run agents in a Podman sandbox and earn reputation.</p></div>
+        <div class="mode"><code>-mode api</code><p>Headless HTTP and OpenAI gateway. The desktop app bundles this.</p></div>
+        <div class="mode"><code>-mode boss</code><p>Interactive terminal dispatcher for mesh operators.</p></div>
+        <div class="mode"><code>-mode relay</code><p>Lighthouse with DHT, NAT relay and the archive ledger.</p></div>
+        <div class="mode"><code>-mode witness</code><p>Ledger replica that catches double-signing peers.</p></div>
+        <div class="mode"><code>-mode genkey</code><p>Mint a swarm key for a fully private mesh.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-tight">
+    <div class="wrap">
+      <div class="cta reveal">
+        <h2>See Warp coordinate a mesh with FalkorDB.</h2>
+        <div class="btn-row">
+          <a class="btn btn-amber btn-lg" href="https://github.com/kris70lesgo/warpg/blob/main/docs/falkordb-hackathon.md">Run the local demo</a>
+          <a class="btn btn-amber btn-lg" href="https://github.com/kris70lesgo/warpg/blob/main/docs/install.md">Build Warp from source</a>
+          <a class="btn btn-ghost btn-lg" href="https://github.com/kris70lesgo/warpg">View source</a>
+        </div>
+      </div>
+    </div>
+  </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <div class="cols">
+        <a href="https://github.com/kris70lesgo/warpg/blob/main/docs/DESKTOP.md">Desktop guide</a>
+        <a href="https://github.com/kris70lesgo/warpg/blob/main/docs/http-api.md">HTTP API</a>
+        <a href="https://github.com/kris70lesgo/warpg/blob/main/docs/trust.md">Trust model</a>
+        <a href="https://github.com/kris70lesgo/warpg/blob/main/docs/private-swarms.md">Private swarms</a>
+        <a href="https://github.com/kris70lesgo/warpg/blob/main/CONTRIBUTING.md">Contribute</a>
+      </div>
+      <p class="fine">Apache-2.0. Built with Go and libp2p.</p>
+    </div>
+  </footer>
+
+  <script src="js/vendor/gsap.min.js" defer></script>
+  <script src="js/vendor/ScrollTrigger.min.js" defer></script>
+  <script src="js/mesh.js" defer></script>
+  <script src="js/main.js" defer></script>
+  <script src="js/scroll.js" defer></script>
+</body>
+</html>

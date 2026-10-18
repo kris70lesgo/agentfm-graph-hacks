@@ -1,0 +1,64 @@
+{
+  "checks": [
+    "Worker failure reaches the OpenAI client",
+    "Real task container produces a delivery plan",
+    "Another Boss reads the failed task from shared memory",
+    "Memory retains digests without raw prompts",
+    "Graph history favors the successful worker",
+    "A second Boss dispatches to the graph-selected worker",
+    "In-flight reservation is visible to another Boss",
+    "A second Boss cannot double-book reserved capacity",
+    "Original task completes normally",
+    "Completion releases the shared reservation",
+    "A fresh Boss process recovers persistent task memory",
+    "FalkorDB restart preserves graph memory on disk"
+  ],
+  "completed_at": "2026-10-17T18:19:25Z",
+  "route": {
+    "candidates": [
+      {
+        "peer_id": "12D3KooWCUFYv1ReVG97G9uR8jvPa8sgPw3yo5E4ErTkyjP1xz7V",
+        "name": "Nova Planner",
+        "model": "nova-local",
+        "capability": "planning",
+        "score": 0.5,
+        "trust_score": 0,
+        "success_rate": 1,
+        "load_ratio": 0,
+        "history_count": 4
+      },
+      {
+        "peer_id": "12D3KooW9uvzTHx6CgjvsemrxivHHa6WhXojZu6oB227gRgVMFXn",
+        "name": "Atlas Planner",
+        "model": "atlas-local",
+        "capability": "planning",
+        "score": 0.2,
+        "trust_score": 0,
+        "success_rate": 0,
+        "load_ratio": 0,
+        "history_count": 2
+      }
+    ],
+    "reason": "FalkorDB ranked live trust-eligible workers by trust, prior task success, and current load.",
+    "selected": {
+      "peer_id": "12D3KooWCUFYv1ReVG97G9uR8jvPa8sgPw3yo5E4ErTkyjP1xz7V",
+      "name": "Nova Planner",
+      "model": "nova-local",
+      "capability": "planning",
+      "score": 0.5,
+      "trust_score": 0,
+      "success_rate": 1,
+      "load_ratio": 0,
+      "history_count": 4
+    },
+    "task_class": "planning"
+  },
+  "summary": {
+    "graph": "warp_graph_hacks",
+    "mesh_id": "graph-hacks-local",
+    "workers": 2,
+    "online_workers": 2,
+    "task_episodes": 8,
+    "active_reservations": 0
+  }
+}

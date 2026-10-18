@@ -1,0 +1,59 @@
+# ==========================================
+# 🚀 Warp .gitignore
+# ==========================================
+
+**/build/*
+*.out
+*.test
+*.prof
+warp_artifacts
+venv/
+my_download.zip
+swarm.key
+.env
+*.pem
+*.crt
+*.key
+*.zip
+*.log
+feedback.log
+*.sqlite
+*.db
+vendor/
+go.work
+go.work.sum
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~
+server.py
+graphify-out
+superpowers
+walkthrough
+.superpowers
+
+# Task output directories. The worker anchors these on its working directory,
+# so a worker started from a clone would otherwise stage real Boss task data.
+.warp_temp/
+.warp-demo/
+.agentfm_temp/
+.agentfm-demo/
+agentfm_artifacts/
+.playwright-cli/
+
+# Build artifacts (generated locally, not committed)
+warp-go/dist/
+warp-go/warp
+warp-go/relay
+
+# Python bytecode
+__pycache__/
+*.pyc
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.agents/*

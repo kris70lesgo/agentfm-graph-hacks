@@ -1,0 +1,18 @@
+services:
+  falkordb:
+    image: falkordb/falkordb:v4.22.1
+    command: ["redis-server", "--loadmodule", "/var/lib/falkordb/bin/falkordb.so", "--appendonly", "yes", "--appendfsync", "everysec"]
+    ports:
+      - "127.0.0.1:${FALKORDB_PORT:-6380}:6379"
+      - "127.0.0.1:${FALKORDB_BROWSER_PORT:-3001}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --raw GRAPH.QUERY _warp_health 'RETURN 1' | grep -q 'Query internal execution time'"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    volumes:
+      - falkordb-data:/var/lib/falkordb/data
+    restart: unless-stopped
+
+volumes:
+  falkordb-data:
